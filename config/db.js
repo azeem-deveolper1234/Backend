@@ -1,11 +1,9 @@
+// config/db.js
 const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
+    await mongoose.connect(process.env.MONGO_URI); // ✅ latest Mongoose me options ki zarurat nahi
     console.log('MongoDB connected');
   } catch (error) {
     console.error('MongoDB connection failed:', error.message);
@@ -13,4 +11,4 @@ const connectDB = async () => {
   }
 };
 
-module.exports = connectDB;  // 👈 Ye important hai
+module.exports = connectDB;  // 👈 ye export sahi hai
