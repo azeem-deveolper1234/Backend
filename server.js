@@ -1,15 +1,18 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const connectDB = require("./config/db"); // 👈 add this
 
 const app = express();
+
+connectDB(); // 👈 database connect karo
 
 app.use(cors());
 app.use(express.json());
 
 // Test route
 app.get("/", (req, res) => {
-  res.send("Backend Running...");
+  res.send("Virtual Queue Management API Running...");
 });
 
 const PORT = process.env.PORT || 5000;
