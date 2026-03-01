@@ -17,8 +17,26 @@ const queueSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["waiting", "serving", "completed"],
+      enum: ["waiting", "serving", "completed", "cancelled"],
       default: "waiting"
+    },
+    priority: {
+      type: String,
+      enum: ["normal", "emergency"],
+      default: "normal"
+    },
+    appointmentDate: {
+      type: Date,
+      required: true,
+      default: Date.now
+    },
+    estimatedTime: {
+      type: Number,
+      default: 0
+    },
+    notes: {
+      type: String,
+      default: ""
     }
   },
   { timestamps: true }
