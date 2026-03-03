@@ -6,7 +6,10 @@ const { Server } = require("socket.io");
 const connectDB = require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const queueRoutes = require("./routes/queueRoutes");
-const analyticsRoutes = require("./routes/analyticsRoutes"); // 👈 ADD
+const analyticsRoutes = require("./routes/analyticsRoutes");
+const doctorRoutes = require("./routes/doctorRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
+const medicalReportRoutes = require("./routes/medicalReportRoutes"); // 👈 SIRF YAHAN
 
 const app = express();
 const server = http.createServer(app);
@@ -23,7 +26,10 @@ app.set("io", io);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/queue", queueRoutes);
-app.use("/api/analytics", analyticsRoutes); // 👈 ADD
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/doctors", doctorRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/medical-reports", medicalReportRoutes); // 👈 SIRF YAHAN
 
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
