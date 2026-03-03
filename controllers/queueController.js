@@ -14,8 +14,21 @@ exports.joinQueue = async (req, res) => {
       return res.status(400).json({ message: "Already in queue" });
     }
 
-    const lastToken = await Queue.findOne({ serviceName })
-      .sort({ tokenNumber: -1 });
+    // Date validation — past date reject karo
+    if (appointmentDate && new Date(appointmentDate) < new Date()) {
+      return res.status(400).json({ message: "Past date nahi le sakte" });
+    }
+
+    // Aaj ka token reset
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const lastToken = await Queue.findOne({
+      serviceName,
+      createdAt: { $gte: today, $lt: tomorrow }
+    }).sort({ tokenNumber: -1 });
 
     const tokenNumber = lastToken ? lastToken.tokenNumber + 1 : 1;
 
@@ -42,6 +55,39 @@ exports.joinQueue = async (req, res) => {
   }
 };
 
+exports.cancelQueue = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const queueEntry = await Queue.findOne({
+      user: userId,
+      status: { $in: ["waiting", "serving"] }
+    });
+
+    if (!queueEntry) {
+      return res.status(404).json({ message: "Queue nahi mili" });
+    }
+
+    queueEntry.status = "cancelled";
+    await queueEntry.save();
+
+    const io = req.app.get("io");
+    io.emit("queueCancelled", {
+      message: "Queue cancelled",
+      tokenNumber: queueEntry.tokenNumber,
+      serviceName: queueEntry.serviceName
+    });
+
+    res.json({
+      message: "Queue cancelled successfully",
+      tokenNumber: queueEntry.tokenNumber
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.callNextPatient = async (req, res) => {
   try {
     const { serviceName } = req.body;
@@ -49,10 +95,9 @@ exports.callNextPatient = async (req, res) => {
     const nextPatient = await Queue.findOne({
       serviceName,
       status: "waiting",
-      priority: "emergency"  // 👈 pehle emergency dekhega
+      priority: "emergency"
     }).sort({ tokenNumber: 1 });
 
-    // agar emergency nahi toh normal lo
     const patient = nextPatient || await Queue.findOne({
       serviceName,
       status: "waiting"
