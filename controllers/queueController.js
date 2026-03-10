@@ -1,4 +1,6 @@
 const Queue = require("../models/Queue");
+const User = require("../models/User");
+const { sendAppointmentSMS, sendTurnSMS, sendCancellationSMS } = require("../services/smsService");
 
 exports.joinQueue = async (req, res) => {
   try {
@@ -14,12 +16,10 @@ exports.joinQueue = async (req, res) => {
       return res.status(400).json({ message: "Already in queue" });
     }
 
-    // Date validation — past date reject karo
     if (appointmentDate && new Date(appointmentDate) < new Date()) {
       return res.status(400).json({ message: "Past date nahi le sakte" });
     }
 
-    // Aaj ka token reset
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -41,6 +41,18 @@ exports.joinQueue = async (req, res) => {
       appointmentDate: appointmentDate || Date.now(),
       notes: notes || ""
     });
+
+    // SMS bhejo — appointment confirm
+    const user = await User.findById(userId);
+    if (user && user.phone) {
+      await sendAppointmentSMS(user.phone, {
+        tokenNumber: queue.tokenNumber,
+        doctorName: serviceName,
+        appointmentDate: queue.appointmentDate.toDateString(),
+        timeSlot: "09:00 AM - 05:00 PM",
+        advanceAmount: 0
+      });
+    }
 
     res.status(201).json({
       message: "Joined queue successfully",
@@ -70,6 +82,15 @@ exports.cancelQueue = async (req, res) => {
 
     queueEntry.status = "cancelled";
     await queueEntry.save();
+
+    // SMS bhejo — cancel
+    const user = await User.findById(userId);
+    if (user && user.phone) {
+      await sendCancellationSMS(user.phone, {
+        tokenNumber: queueEntry.tokenNumber,
+        advanceAmount: 0
+      });
+    }
 
     const io = req.app.get("io");
     io.emit("queueCancelled", {
@@ -109,6 +130,15 @@ exports.callNextPatient = async (req, res) => {
 
     patient.status = "serving";
     await patient.save();
+
+    // SMS bhejo — turn aa gaya
+    const user = await User.findById(patient.user);
+    if (user && user.phone) {
+      await sendTurnSMS(user.phone, {
+        tokenNumber: patient.tokenNumber,
+        doctorName: patient.serviceName
+      });
+    }
 
     const io = req.app.get("io");
     io.emit("queueUpdated", {
