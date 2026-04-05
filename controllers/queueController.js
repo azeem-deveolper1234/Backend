@@ -174,8 +174,8 @@ exports.getQueueStatus = async (req, res) => {
       status: "serving"
     }).sort({ tokenNumber: 1 });
     const currentServing = servingPatient ? servingPatient.tokenNumber : 0;
-    const peopleAhead = userQueue.tokenNumber - currentServing - 1;
-    const estimatedTime = peopleAhead > 0 ? peopleAhead * 10 : 0;
+   const peopleAhead = userQueue.tokenNumber - currentServing - 1;
+const estimatedTime = peopleAhead > 0 ? peopleAhead * 15 : 0; // 15 min per patient
     res.json({
        _id: userQueue._id, 
       currentServing,
