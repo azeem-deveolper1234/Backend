@@ -177,6 +177,7 @@ exports.getQueueStatus = async (req, res) => {
     const peopleAhead = userQueue.tokenNumber - currentServing - 1;
     const estimatedTime = peopleAhead > 0 ? peopleAhead * 10 : 0;
     res.json({
+       _id: userQueue._id, 
       currentServing,
       yourToken: userQueue.tokenNumber,
       peopleAhead: peopleAhead > 0 ? peopleAhead : 0,

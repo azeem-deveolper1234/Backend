@@ -11,4 +11,16 @@ router.post("/complete", protect, adminOnly, completeQueue);
 router.get("/status", protect, getQueueStatus);
 router.get("/history", protect, getPatientHistory);
 
+router.get("/patient/:userId", protect, adminOnly, async (req, res) => {
+  try {
+    const Queue = require("../models/Queue");
+    const queue = await Queue.findOne({
+      user: req.params.userId,
+      status: { $in: ["waiting", "serving"] }
+    });
+    res.json(queue);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
 module.exports = router;
