@@ -8,30 +8,17 @@ exports.getTodayAnalytics = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Aaj ke sare patients
-    const totalPatients = await Queue.countDocuments({
+    // 1. Aaj ka poora data fetch karo (User details ke sath)
+    const allQueueToday = await Queue.find({
       createdAt: { $gte: today, $lt: tomorrow }
-    });
+    }).populate('user', 'name email').sort({ createdAt: -1 });
 
-    // Completed patients
-    const completedPatients = await Queue.countDocuments({
-      createdAt: { $gte: today, $lt: tomorrow },
-      status: "completed"
-    });
+    // 2. Data array se counts nikaalo
+    const totalPatients = allQueueToday.length;
+    const completedPatients = allQueueToday.filter(q => q.status === "completed").length;
+    const waitingPatients = allQueueToday.filter(q => q.status === "waiting").length;
+    const emergencyPatients = allQueueToday.filter(q => q.priority === "emergency").length;
 
-    // Waiting patients
-    const waitingPatients = await Queue.countDocuments({
-      createdAt: { $gte: today, $lt: tomorrow },
-      status: "waiting"
-    });
-
-    // Emergency patients
-    const emergencyPatients = await Queue.countDocuments({
-      createdAt: { $gte: today, $lt: tomorrow },
-      priority: "emergency"
-    });
-
-    // Average wait time
     const avgWaitTime = waitingPatients * 10;
 
     res.json({
@@ -40,6 +27,7 @@ exports.getTodayAnalytics = async (req, res) => {
       completedPatients,
       waitingPatients,
       emergencyPatients,
+      allQueueToday, // Frontend table ke liye
       averageWaitTime: `${avgWaitTime} minutes`
     });
 
@@ -51,12 +39,17 @@ exports.getTodayAnalytics = async (req, res) => {
 // Overall analytics
 exports.getOverallAnalytics = async (req, res) => {
   try {
-    const totalPatients = await Queue.countDocuments();
-    const completedPatients = await Queue.countDocuments({ status: "completed" });
-    const emergencyPatients = await Queue.countDocuments({ priority: "emergency" });
-    const normalPatients = await Queue.countDocuments({ priority: "normal" });
+    // 1. Database se saare patients (Ever) ka data nikaalo
+    const allQueueHistory = await Queue.find()
+      .populate('user', 'name email')
+      .sort({ createdAt: -1 });
 
-    // Sabse busy service
+    const totalPatients = allQueueHistory.length;
+    const completedPatients = allQueueHistory.filter(q => q.status === "completed").length;
+    const emergencyPatients = allQueueHistory.filter(q => q.priority === "emergency").length;
+    const normalPatients = allQueueHistory.filter(q => q.priority === "normal").length;
+
+    // Sabse busy service logic
     const busyService = await Queue.aggregate([
       { $group: { _id: "$serviceName", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
@@ -68,8 +61,9 @@ exports.getOverallAnalytics = async (req, res) => {
       completedPatients,
       emergencyPatients,
       normalPatients,
+      allQueueHistory, // Frontend "Total Patient Ever" card ke liye
       mostBusyService: busyService[0]?._id || "N/A",
-      completionRate: `${Math.round((completedPatients / totalPatients) * 100)}%`
+      completionRate: totalPatients > 0 ? `${Math.round((completedPatients / totalPatients) * 100)}%` : "0%"
     });
 
   } catch (error) {

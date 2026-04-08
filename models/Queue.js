@@ -20,6 +20,7 @@ const queueSchema = new mongoose.Schema(
       enum: ["waiting", "serving", "completed", "cancelled"],
       default: "waiting"
     },
+
     priority: {
       type: String,
       enum: ["normal", "emergency"],
