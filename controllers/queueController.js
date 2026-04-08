@@ -8,9 +8,9 @@ exports.joinQueue = async (req, res) => {
     const userId = req.user.id;
 
     const existingQueue = await Queue.findOne({
-      user: userId,
-      status: { $in: ["waiting", "serving"] }
-    });
+  user: userId,
+  status: { $in: ["waiting", "serving"] }
+});
 
     if (existingQueue) {
       return res.status(400).json({ message: "Already in queue" });
@@ -25,10 +25,11 @@ exports.joinQueue = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const lastToken = await Queue.findOne({
-      serviceName,
-      createdAt: { $gte: today, $lt: tomorrow }
-    }).sort({ tokenNumber: -1 });
+  const lastToken = await Queue.findOne({
+  serviceName,
+  createdAt: { $gte: today, $lt: tomorrow },
+  status: { $in: ["waiting", "serving", "completed"] } // cancelled exclude
+}).sort({ tokenNumber: -1 });
 
     const tokenNumber = lastToken ? lastToken.tokenNumber + 1 : 1;
 

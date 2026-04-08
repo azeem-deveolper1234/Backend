@@ -45,6 +45,10 @@ const doctorSchema = new mongoose.Schema(
       type: Number,
       default: 20
     },
+    consultationFee: {
+      type: Number,
+      default: 1000  // 👈 default fee Rs. 1000
+    },
     isActive: {
       type: Boolean,
       default: true
