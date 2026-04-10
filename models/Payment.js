@@ -41,8 +41,12 @@ const paymentSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ["cash", "card", "online"],
       default: "cash"
+    },
+    // DB / purani enum sirf cash|card|online ho to bhi save ho sake; asal channel yahan
+    walletChannel: {
+      type: String,
+      default: null
     },
     cancelledAt: {
       type: Date,
@@ -55,5 +59,9 @@ const paymentSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+if (mongoose.models.Payment) {
+  delete mongoose.models.Payment;
+}
 
 module.exports = mongoose.model("Payment", paymentSchema);

@@ -2,14 +2,43 @@ const Payment = require("../models/Payment");
 const Queue = require("../models/Queue");
 const Doctor = require("../models/Doctor");
 
+/** Sirf yeh teen DB / purani enum ke liye safe hain — kabhi easypaisa/jazzcash yahan na bhejo */
+function safePaymentMethodForDb(rawMethod, explicitWallet) {
+  const m = String(rawMethod || "cash").toLowerCase().trim();
+  const w = explicitWallet
+    ? String(explicitWallet).toLowerCase().trim()
+    : null;
+  if (m === "easypaisa" || m === "jazzcash") {
+    return { paymentMethod: "online", walletChannel: m };
+  }
+  if (w === "easypaisa" || w === "jazzcash") {
+    return { paymentMethod: "online", walletChannel: w };
+  }
+  if (m === "cash" || m === "card" || m === "online") {
+    return { paymentMethod: m, walletChannel: null };
+  }
+  return { paymentMethod: "online", walletChannel: null };
+}
+
 // Advance payment karo
 exports.createPayment = async (req, res) => {
   try {
 
     console.log("Payment request received:", req.body); // 👈 add karo
     
-    const { queueId, doctorId, totalAmount, paymentMethod } = req.body;
+    const { queueId, doctorId, totalAmount, paymentMethod, walletChannel } =
+      req.body;
     const userId = req.user.id;
+    let { paymentMethod: methodToSave, walletChannel: wc } =
+      safePaymentMethodForDb(paymentMethod, walletChannel);
+    if (!["cash", "card", "online"].includes(methodToSave)) {
+      methodToSave = "online";
+    }
+
+    const numAmount = Number(totalAmount);
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
+      return res.status(400).json({ message: "Maqsad raqam (totalAmount) darust nahi hai" });
+    }
 
     // Queue check karo
     const queue = await Queue.findById(queueId);
@@ -24,28 +53,30 @@ exports.createPayment = async (req, res) => {
     }
 
     // Advance 50% hogi
-    const advanceAmount = totalAmount / 2;
-    const remainingAmount = totalAmount - advanceAmount;
+    const advanceAmount = numAmount / 2;
+    const remainingAmount = numAmount - advanceAmount;
 
     const payment = await Payment.create({
       user: userId,
       queue: queueId,
       doctor: doctorId,
-      totalAmount,
+      totalAmount: numAmount,
       advanceAmount,
       remainingAmount,
       advanceStatus: "paid",
-      paymentMethod: paymentMethod || "cash"
+      paymentMethod: methodToSave,
+      ...(wc ? { walletChannel: wc } : {})
     });
 
     res.status(201).json({
       message: "Advance payment successful",
       payment: {
-        totalAmount,
+        totalAmount: numAmount,
         advanceAmount,
         remainingAmount,
         advanceStatus: payment.advanceStatus,
-        paymentMethod: payment.paymentMethod
+        paymentMethod: payment.paymentMethod,
+        walletChannel: payment.walletChannel || null
       }
     });
 
