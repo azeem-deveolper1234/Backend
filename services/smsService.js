@@ -76,3 +76,21 @@ exports.sendCancellationSMS = async (phone, data) => {
     return { success: false, error: error.message };
   }
 };
+
+// Approaching Turn SMS
+exports.sendApproachingSMS = async (phone, data) => {
+  try {
+    const message = await client.messages.create({
+      body: `🏥 City Medical Clinic\n\nAlert! Apka number qareeb hai.\nToken: ${data.tokenNumber}\nExpected Wait: ${data.estimatedWait} mins.\n\nBaraye meharbani clinic puhanch jayein.`,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: phone
+    });
+
+    console.log("Approaching SMS sent:", message.sid);
+    return { success: true, sid: message.sid };
+
+  } catch (error) {
+    console.error("SMS error:", error.message);
+    return { success: false, error: error.message };
+  }
+};

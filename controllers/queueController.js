@@ -1,6 +1,7 @@
 const Queue = require("../models/Queue");
 const User = require("../models/User");
-const { sendAppointmentSMS, sendTurnSMS, sendCancellationSMS } = require("../services/smsService");
+const Doctor = require("../models/Doctor");
+const { sendAppointmentSMS, sendTurnSMS, sendCancellationSMS, sendApproachingSMS } = require("../services/smsService");
 
 exports.joinQueue = async (req, res) => {
   try {
@@ -20,16 +21,29 @@ exports.joinQueue = async (req, res) => {
       return res.status(400).json({ message: "Past date nahi le sakte" });
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const targetDate = new Date(appointmentDate || Date.now());
+    targetDate.setHours(0, 0, 0, 0);
+    const nextDay = new Date(targetDate);
+    nextDay.setDate(nextDay.getDate() + 1);
 
-  const lastToken = await Queue.findOne({
-  serviceName,
-  createdAt: { $gte: today, $lt: tomorrow },
-  status: { $in: ["waiting", "serving", "completed"] } // cancelled exclude
-}).sort({ tokenNumber: -1 });
+    const lastToken = await Queue.findOne({
+      serviceName,
+      appointmentDate: { $gte: targetDate, $lt: nextDay },
+      status: { $in: ["waiting", "serving", "completed"] } 
+    }).sort({ tokenNumber: -1 });
+
+    const todayPatients = await Queue.countDocuments({
+      serviceName,
+      appointmentDate: { $gte: targetDate, $lt: nextDay },
+      status: { $nin: ["cancelled"] }
+    });
+
+    const doctor = await Doctor.findOne({ name: serviceName });
+    if (doctor && todayPatients >= doctor.maxPatientsPerDay) {
+      return res.status(400).json({ 
+        message: "Is din ke sare slots full ho gaye hain — koi aur date try karein!" 
+      });
+    }
 
     const tokenNumber = lastToken ? lastToken.tokenNumber + 1 : 1;
 
@@ -39,9 +53,12 @@ exports.joinQueue = async (req, res) => {
       tokenNumber,
       status: "waiting",
       priority: priority || "normal",
-      appointmentDate: appointmentDate || Date.now(),
+      appointmentDate: targetDate, // Store normalized date or keep full date if hours matter, but targetDate is fine. Actually keep full user input date: appointmentDate || Date.now()
       notes: notes || ""
     });
+    // Restore appointmentDate directly to queue: 
+    queue.appointmentDate = appointmentDate || Date.now();
+    await queue.save();
 
     // SMS bhejo — appointment confirm
     const user = await User.findById(userId);
@@ -57,6 +74,7 @@ exports.joinQueue = async (req, res) => {
 
     res.status(201).json({
       message: "Joined queue successfully",
+      _id: queue._id,
       tokenNumber: queue.tokenNumber,
       serviceName: queue.serviceName,
       priority: queue.priority,
@@ -132,6 +150,18 @@ exports.callNextPatient = async (req, res) => {
     patient.status = "serving";
     await patient.save();
 
+
+// Time validation — 9am to 5pm
+// const now = new Date();
+// const hours = now.getHours();
+// if (hours < 9 || hours >= 5) {
+//   return res.status(400).json({ 
+//     message: "Clinic hours 9:00 AM to 5:00 PM hain — is waqt appointment nahi ho sakti!" 
+//   });
+// }
+
+// Removed buggy max patients check since it's already handled during queue booking
+
     // SMS bhejo — turn aa gaya
     const user = await User.findById(patient.user);
     if (user && user.phone) {
@@ -139,6 +169,27 @@ exports.callNextPatient = async (req, res) => {
         tokenNumber: patient.tokenNumber,
         doctorName: patient.serviceName
       });
+    }
+
+    // NEW LOGIC: Proactive Twilio Notification (Approaching Turn)
+    const upcomingPatients = await Queue.find({
+      serviceName,
+      status: "waiting",
+    }).sort({ priority: 1, tokenNumber: 1 }).limit(3); 
+    // note: 'emergency' comes before 'normal' in sort usually, but simplest is just waiting list 
+
+    if (upcomingPatients.length === 3) {
+      const targetPatient = upcomingPatients[2]; // 3rd patient from now
+      const targetUser = await User.findById(targetPatient.user);
+      const doctorDetails = await Doctor.findOne({ name: serviceName });
+      
+      if (targetUser && targetUser.phone) {
+        const estimatedWait = (doctorDetails?.slotDuration || 15) * 3;
+        await sendApproachingSMS(targetUser.phone, {
+          tokenNumber: targetPatient.tokenNumber,
+          estimatedWait: estimatedWait
+        });
+      }
     }
 
     const io = req.app.get("io");
@@ -239,6 +290,26 @@ exports.getPatientHistory = async (req, res) => {
     res.json({
       totalVisits: history.length,
       history
+    });
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.clearOldData = async (req, res) => {
+  try {
+    const days = parseInt(req.body.days) || 14;
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+
+    const result = await Queue.deleteMany({
+      createdAt: { $lt: cutoffDate },
+      status: { $in: ["completed", "cancelled"] }
+    });
+
+    res.json({
+      message: `Deleted ${result.deletedCount} old records from the queue`
     });
 
   } catch (error) {

@@ -5,6 +5,9 @@ const Doctor = require("../models/Doctor");
 // Advance payment karo
 exports.createPayment = async (req, res) => {
   try {
+
+    console.log("Payment request received:", req.body); // 👈 add karo
+    
     const { queueId, doctorId, totalAmount, paymentMethod } = req.body;
     const userId = req.user.id;
 
@@ -55,6 +58,7 @@ exports.createPayment = async (req, res) => {
 exports.completeFinalPayment = async (req, res) => {
   try {
     const { paymentId } = req.params;
+    const { method } = req.body; 
 
     const payment = await Payment.findById(paymentId);
     if (!payment) {
@@ -66,7 +70,8 @@ exports.completeFinalPayment = async (req, res) => {
     }
 
     payment.finalStatus = "paid";
-    payment.remainingAmount = 0;
+    payment.paymentMethod = method || payment.paymentMethod; 
+
     await payment.save();
 
     res.json({
@@ -79,7 +84,6 @@ exports.completeFinalPayment = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-
 // Payment cancel karo — advance zaya jayega
 exports.cancelPayment = async (req, res) => {
   try {
@@ -141,7 +145,11 @@ exports.getAllPayments = async (req, res) => {
 
     const totalRevenue = payments
       .filter(p => p.advanceStatus === "paid")
-      .reduce((sum, p) => sum + p.advanceAmount, 0);
+      .reduce((sum, p) => {
+         let rev = p.advanceAmount;
+         if (p.finalStatus === "paid") rev += p.remainingAmount;
+         return sum + rev;
+      }, 0);
 
     res.json({
       totalPayments: payments.length,
