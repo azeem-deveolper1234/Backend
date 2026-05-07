@@ -85,11 +85,12 @@ exports.createPayment = async (req, res) => {
   }
 };
 
-// Final payment karo
+// Final payment karo — method: cash | card | online | easypaisa | jazzcash (advance fields same rehte hain)
 exports.completeFinalPayment = async (req, res) => {
   try {
     const { paymentId } = req.params;
-    const { method } = req.body; 
+    const body = req.body || {};
+    const rawMethod = String(body.method || "cash").toLowerCase().trim();
 
     const payment = await Payment.findById(paymentId);
     if (!payment) {
@@ -100,15 +101,38 @@ exports.completeFinalPayment = async (req, res) => {
       return res.status(400).json({ message: "Payment pehle se complete hai" });
     }
 
+    let finalSettlementMethod = "cash";
+    let finalSettlementWallet = null;
+
+    if (rawMethod === "easypaisa" || rawMethod === "jazzcash") {
+      finalSettlementMethod = "online";
+      finalSettlementWallet = rawMethod;
+    } else if (rawMethod === "card") {
+      finalSettlementMethod = "card";
+    } else if (rawMethod === "online") {
+      finalSettlementMethod = "online";
+      const w = body.walletChannel
+        ? String(body.walletChannel).toLowerCase().trim()
+        : null;
+      if (w === "easypaisa" || w === "jazzcash") {
+        finalSettlementWallet = w;
+      }
+    } else {
+      finalSettlementMethod = "cash";
+    }
+
     payment.finalStatus = "paid";
-    payment.paymentMethod = method || payment.paymentMethod; 
+    payment.finalSettlementMethod = finalSettlementMethod;
+    payment.finalSettlementWallet = finalSettlementWallet;
 
     await payment.save();
 
     res.json({
       message: "Final payment complete",
       totalPaid: payment.totalAmount,
-      paymentStatus: "fully paid"
+      paymentStatus: "fully paid",
+      finalSettlementMethod: payment.finalSettlementMethod,
+      finalSettlementWallet: payment.finalSettlementWallet
     });
 
   } catch (error) {

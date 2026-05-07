@@ -1,7 +1,29 @@
 const Queue = require("../models/Queue");
 const User = require("../models/User");
 const Doctor = require("../models/Doctor");
+const Payment = require("../models/Payment");
+const MedicalReport = require("../models/MedicalReport");
 const { sendAppointmentSMS, sendTurnSMS, sendCancellationSMS, sendApproachingSMS } = require("../services/smsService");
+
+/** HTML date (YYYY-MM-DD) ko server ke local calendar day se map karo — sirf `new Date("YYYY-MM-DD")` UTC midnight se "aaj" galat reject hota tha */
+function localMidnightFromAppointmentInput(appointmentDate) {
+  if (appointmentDate == null || appointmentDate === "") return null;
+  const s = String(appointmentDate).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, mo, d] = s.split("-").map((x) => parseInt(x, 10));
+    return new Date(y, mo - 1, d, 0, 0, 0, 0);
+  }
+  const dt = new Date(appointmentDate);
+  if (Number.isNaN(dt.getTime())) return dt;
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+}
+
+function startOfTodayLocal() {
+  const t = new Date();
+  t.setHours(0, 0, 0, 0);
+  return t;
+}
 
 exports.joinQueue = async (req, res) => {
   try {
@@ -17,12 +39,21 @@ exports.joinQueue = async (req, res) => {
       return res.status(400).json({ message: "Already in queue" });
     }
 
-    if (appointmentDate && new Date(appointmentDate) < new Date()) {
-      return res.status(400).json({ message: "Past date nahi le sakte" });
+    let targetDate;
+    if (appointmentDate) {
+      const apptDay = localMidnightFromAppointmentInput(appointmentDate);
+      if (Number.isNaN(apptDay.getTime())) {
+        return res.status(400).json({ message: "Appointment date darust nahi hai" });
+      }
+      const today = startOfTodayLocal();
+      if (apptDay < today) {
+        return res.status(400).json({ message: "Past date nahi le sakte" });
+      }
+      targetDate = apptDay;
+    } else {
+      targetDate = new Date();
+      targetDate.setHours(0, 0, 0, 0);
     }
-
-    const targetDate = new Date(appointmentDate || Date.now());
-    targetDate.setHours(0, 0, 0, 0);
     const nextDay = new Date(targetDate);
     nextDay.setDate(nextDay.getDate() + 1);
 
@@ -53,12 +84,9 @@ exports.joinQueue = async (req, res) => {
       tokenNumber,
       status: "waiting",
       priority: priority || "normal",
-      appointmentDate: targetDate, // Store normalized date or keep full date if hours matter, but targetDate is fine. Actually keep full user input date: appointmentDate || Date.now()
+      appointmentDate: targetDate,
       notes: notes || ""
     });
-    // Restore appointmentDate directly to queue: 
-    queue.appointmentDate = appointmentDate || Date.now();
-    await queue.save();
 
     // SMS bhejo — appointment confirm
     const user = await User.findById(userId);
@@ -284,7 +312,7 @@ exports.getPatientHistory = async (req, res) => {
 
     const history = await Queue.find({
       user: userId,
-      status: "completed"
+      status: { $in: ["completed", "cancelled"] }
     }).sort({ createdAt: -1 });
 
     res.json({
@@ -297,21 +325,95 @@ exports.getPatientHistory = async (req, res) => {
   }
 };
 
-exports.clearOldData = async (req, res) => {
+/** Admin / doctor — patient ki saari clinic visits + reports + payments (pehli dafa / doosri dafa history) */
+exports.getPatientClinicHistory = async (req, res) => {
   try {
-    const days = parseInt(req.body.days) || 14;
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const { userId } = req.params;
 
-    const result = await Queue.deleteMany({
-      createdAt: { $lt: cutoffDate },
-      status: { $in: ["completed", "cancelled"] }
-    });
+    const patient = await User.findById(userId).select("name email phone createdAt");
+    if (!patient) {
+      return res.status(404).json({ message: "Patient nahi mila" });
+    }
+
+    const visits = await Queue.find({ user: userId })
+      .sort({ appointmentDate: -1, createdAt: -1 })
+      .select(
+        "tokenNumber serviceName status priority notes appointmentDate createdAt updatedAt"
+      )
+      .lean();
+
+    const reports = await MedicalReport.find({ patient: userId })
+      .populate("doctor", "name specialization")
+      .populate("queue", "serviceName tokenNumber appointmentDate status")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const payments = await Payment.find({ user: userId })
+      .populate("doctor", "name specialization")
+      .populate("queue", "serviceName tokenNumber appointmentDate")
+      .sort({ createdAt: -1 })
+      .select(
+        "totalAmount advanceAmount remainingAmount advanceStatus finalStatus paymentMethod walletChannel finalSettlementMethod finalSettlementWallet createdAt doctor queue"
+      )
+      .lean();
 
     res.json({
-      message: `Deleted ${result.deletedCount} old records from the queue`
+      patient,
+      visits,
+      reports,
+      payments,
+      totalVisits: visits.length,
+      totalReports: reports.length,
+      totalPayments: payments.length
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.clearOldData = async (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(parseInt(String(req.body.days), 10) || 14, 365));
+    const cutoffDate = new Date();
+    cutoffDate.setHours(0, 0, 0, 0);
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+
+    /**
+     * Pehle sirf completed/cancelled + createdAt — zyada tar test rows `waiting` reh jati thin,
+     * ya appointmentDate purani / createdAt naya — ab dono clock se "purana" data nikalta hai.
+     */
+    const result = await Queue.deleteMany({
+      $or: [
+        { createdAt: { $lt: cutoffDate } },
+        { appointmentDate: { $lt: cutoffDate } }
+      ]
     });
 
+    const existingQueueIds = await Queue.distinct("_id");
+    let payResult = { deletedCount: 0 };
+    if (existingQueueIds.length > 0) {
+      payResult = await Payment.deleteMany({
+        queue: { $nin: existingQueueIds }
+      });
+    }
+
+    const hint =
+      result.deletedCount === 0 && payResult.deletedCount === 0
+        ? `Koi row match nahi hui — sab queue records is cutoff ke baad ke hain (${cutoffDate.toDateString()}). Zyada saaf karne ke liye API body mein "days" kam bhejein (maslan 7 ya 1).`
+        : null;
+
+    const parts = [`Deleted ${result.deletedCount} queue record(s)`];
+    if (payResult.deletedCount > 0) {
+      parts.push(`${payResult.deletedCount} orphan payment(s) removed`);
+    }
+
+    res.json({
+      message: parts.join(" — "),
+      deletedCount: result.deletedCount,
+      paymentsRemoved: payResult.deletedCount,
+      cutoffDate: cutoffDate.toISOString(),
+      hint
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

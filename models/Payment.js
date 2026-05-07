@@ -48,6 +48,15 @@ const paymentSchema = new mongoose.Schema(
       type: String,
       default: null
     },
+    /** Baqi (50%) jis channel se liya — advance wala paymentMethod / walletChannel overwrite nahi hota */
+    finalSettlementMethod: {
+      type: String,
+      default: null
+    },
+    finalSettlementWallet: {
+      type: String,
+      default: null
+    },
     cancelledAt: {
       type: Date,
       default: null
