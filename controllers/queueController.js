@@ -206,8 +206,8 @@ exports.callNextPatient = async (req, res) => {
     }).sort({ priority: 1, tokenNumber: 1 }).limit(3); 
     // note: 'emergency' comes before 'normal' in sort usually, but simplest is just waiting list 
 
-    if (upcomingPatients.length === 3) {
-      const targetPatient = upcomingPatients[2]; // 3rd patient from now
+    if (upcomingPatients.length >= 3) {
+      const targetPatient = upcomingPatients[2]; // 3rd in line — warn when queue has 3+ waiting
       const targetUser = await User.findById(targetPatient.user);
       const doctorDetails = await Doctor.findOne({ name: serviceName });
       
@@ -371,9 +371,17 @@ exports.getPatientClinicHistory = async (req, res) => {
   }
 };
 
+/** Purana queue/payment cleanup — `days` se kam se kam 14 hona chahiye (pehle 14 din ka data protect). */
+const MIN_CLEAR_RETENTION_DAYS = 14;
+const MAX_CLEAR_RETENTION_DAYS = 365;
+
 exports.clearOldData = async (req, res) => {
   try {
-    const days = Math.max(1, Math.min(parseInt(String(req.body.days), 10) || 14, 365));
+    const requested = parseInt(String(req.body.days), 10);
+    const days = Math.max(
+      MIN_CLEAR_RETENTION_DAYS,
+      Math.min(Number.isFinite(requested) && requested > 0 ? requested : MIN_CLEAR_RETENTION_DAYS, MAX_CLEAR_RETENTION_DAYS)
+    );
     const cutoffDate = new Date();
     cutoffDate.setHours(0, 0, 0, 0);
     cutoffDate.setDate(cutoffDate.getDate() - days);
@@ -399,7 +407,7 @@ exports.clearOldData = async (req, res) => {
 
     const hint =
       result.deletedCount === 0 && payResult.deletedCount === 0
-        ? `Koi row match nahi hui — sab queue records is cutoff ke baad ke hain (${cutoffDate.toDateString()}). Zyada saaf karne ke liye API body mein "days" kam bhejein (maslan 7 ya 1).`
+        ? `Koi row match nahi hui — sab queue records is cutoff ke baad ke hain (${cutoffDate.toDateString()}). Kam records delete karne ke liye "days" barhaein (maslan 30 ya 60). Note: kam az kam ${MIN_CLEAR_RETENTION_DAYS} din — is se naya data delete nahi ho sakta.`
         : null;
 
     const parts = [`Deleted ${result.deletedCount} queue record(s)`];
@@ -412,6 +420,8 @@ exports.clearOldData = async (req, res) => {
       deletedCount: result.deletedCount,
       paymentsRemoved: payResult.deletedCount,
       cutoffDate: cutoffDate.toISOString(),
+      retentionDays: days,
+      minRetentionDays: MIN_CLEAR_RETENTION_DAYS,
       hint
     });
   } catch (error) {

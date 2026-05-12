@@ -11,7 +11,9 @@ const connectDB = async () => {
     // SRV manually resolve karo (optional check)
     try {
       const records = await dns.resolveSrv('_mongodb._tcp.cluster0.mec1oyr.mongodb.net');
-      console.log('SRV Records:', records);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('SRV Records:', records);
+      }
     } catch (srvErr) {
       console.warn('Manual SRV resolution failed, mongoose will try itself:', srvErr.message);
     }

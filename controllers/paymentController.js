@@ -23,9 +23,6 @@ function safePaymentMethodForDb(rawMethod, explicitWallet) {
 // Advance payment karo
 exports.createPayment = async (req, res) => {
   try {
-
-    console.log("Payment request received:", req.body); // 👈 add karo
-    
     const { queueId, doctorId, totalAmount, paymentMethod, walletChannel } =
       req.body;
     const userId = req.user.id;
