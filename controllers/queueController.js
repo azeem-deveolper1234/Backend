@@ -257,7 +257,8 @@ exports.getQueueStatus = async (req, res) => {
    const peopleAhead = userQueue.tokenNumber - currentServing - 1;
 const estimatedTime = peopleAhead > 0 ? peopleAhead * 15 : 0; // 15 min per patient
     res.json({
-       _id: userQueue._id, 
+       _id: userQueue._id,
+      serviceName: userQueue.serviceName,
       currentServing,
       yourToken: userQueue.tokenNumber,
       peopleAhead: peopleAhead > 0 ? peopleAhead : 0,
