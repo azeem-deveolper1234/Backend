@@ -77,7 +77,7 @@ exports.getSingleReport = async (req, res) => {
       .populate("queue", "serviceName tokenNumber appointmentDate");
 
     if (!report) {
-      return res.status(404).json({ message: "Report nahi mili" });
+      return res.status(404).json({ message: "Medical report not found" });
     }
 
     res.json(report);
@@ -119,7 +119,7 @@ exports.updateReport = async (req, res) => {
     );
 
     if (!report) {
-      return res.status(404).json({ message: "Report nahi mili" });
+      return res.status(404).json({ message: "Medical report not found" });
     }
 
     res.json({

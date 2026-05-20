@@ -34,19 +34,19 @@ exports.createPayment = async (req, res) => {
 
     const numAmount = Number(totalAmount);
     if (!Number.isFinite(numAmount) || numAmount <= 0) {
-      return res.status(400).json({ message: "Maqsad raqam (totalAmount) darust nahi hai" });
+      return res.status(400).json({ message: "The specified totalAmount is invalid" });
     }
 
     // Queue check karo
     const queue = await Queue.findById(queueId);
     if (!queue) {
-      return res.status(404).json({ message: "Queue nahi mili" });
+      return res.status(404).json({ message: "Queue record not found" });
     }
 
     // Doctor check karo
     const doctor = await Doctor.findById(doctorId);
     if (!doctor) {
-      return res.status(404).json({ message: "Doctor nahi mila" });
+      return res.status(404).json({ message: "Doctor not found" });
     }
 
     // Advance 50% hogi
@@ -91,11 +91,11 @@ exports.completeFinalPayment = async (req, res) => {
 
     const payment = await Payment.findById(paymentId);
     if (!payment) {
-      return res.status(404).json({ message: "Payment nahi mili" });
+      return res.status(404).json({ message: "Payment record not found" });
     }
 
     if (payment.finalStatus === "paid") {
-      return res.status(400).json({ message: "Payment pehle se complete hai" });
+      return res.status(400).json({ message: "Payment is already completed" });
     }
 
     let finalSettlementMethod = "cash";
@@ -143,11 +143,11 @@ exports.cancelPayment = async (req, res) => {
 
     const payment = await Payment.findById(paymentId);
     if (!payment) {
-      return res.status(404).json({ message: "Payment nahi mili" });
+      return res.status(404).json({ message: "Payment record not found" });
     }
 
     if (payment.advanceStatus === "cancelled") {
-      return res.status(400).json({ message: "Payment pehle se cancel hai" });
+      return res.status(400).json({ message: "Payment is already cancelled" });
     }
 
     payment.advanceStatus = "cancelled";
@@ -156,7 +156,7 @@ exports.cancelPayment = async (req, res) => {
     await payment.save();
 
     res.json({
-      message: "Payment cancelled — advance refund nahi hoga",
+      message: "Payment cancelled - advance deposit is non-refundable",
       lostAmount: payment.advanceAmount,
       cancelledAt: payment.cancelledAt
     });

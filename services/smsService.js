@@ -82,7 +82,7 @@ exports.sendCancellationSMS = async (phone, data) => {
 
 // Approaching Turn SMS
 exports.sendApproachingSMS = async (phone, data) => {
-  const body = `🏥 City Medical Clinic\n\nAlert! Apka number qareeb hai.\nToken: ${data.tokenNumber}\nExpected Wait: ${data.estimatedWait} mins.\n\nBaraye meharbani clinic puhanch jayein.`;
+  const body = `🏥 City Medical Clinic\n\nAlert! Your turn is approaching.\nToken: ${data.tokenNumber}\nExpected Wait: ${data.estimatedWait} mins.\n\nPlease proceed to the clinic immediately.`;
   const result = await sendTwilioSms(formatPhone(phone), body);
   if (result.success) console.log("Approaching SMS sent:", result.sid);
   return result;

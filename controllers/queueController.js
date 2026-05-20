@@ -43,11 +43,11 @@ exports.joinQueue = async (req, res) => {
     if (appointmentDate) {
       const apptDay = localMidnightFromAppointmentInput(appointmentDate);
       if (Number.isNaN(apptDay.getTime())) {
-        return res.status(400).json({ message: "Appointment date darust nahi hai" });
+        return res.status(400).json({ message: "The specified appointment date is invalid" });
       }
       const today = startOfTodayLocal();
       if (apptDay < today) {
-        return res.status(400).json({ message: "Past date nahi le sakte" });
+        return res.status(400).json({ message: "Appointment cannot be booked for a past date" });
       }
       targetDate = apptDay;
     } else {
@@ -72,7 +72,7 @@ exports.joinQueue = async (req, res) => {
     const doctor = await Doctor.findOne({ name: serviceName });
     if (doctor && todayPatients >= doctor.maxPatientsPerDay) {
       return res.status(400).json({ 
-        message: "Is din ke sare slots full ho gaye hain — koi aur date try karein!" 
+        message: "All slots for this day are fully booked. Please try another date!" 
       });
     }
 
@@ -124,7 +124,7 @@ exports.cancelQueue = async (req, res) => {
     });
 
     if (!queueEntry) {
-      return res.status(404).json({ message: "Queue nahi mili" });
+      return res.status(404).json({ message: "Queue record not found" });
     }
 
     queueEntry.status = "cancelled";
@@ -333,7 +333,7 @@ exports.getPatientClinicHistory = async (req, res) => {
 
     const patient = await User.findById(userId).select("name email phone createdAt");
     if (!patient) {
-      return res.status(404).json({ message: "Patient nahi mila" });
+      return res.status(404).json({ message: "Patient not found" });
     }
 
     const visits = await Queue.find({ user: userId })
@@ -408,7 +408,7 @@ exports.clearOldData = async (req, res) => {
 
     const hint =
       result.deletedCount === 0 && payResult.deletedCount === 0
-        ? `Koi row match nahi hui — sab queue records is cutoff ke baad ke hain (${cutoffDate.toDateString()}). Kam records delete karne ke liye "days" barhaein (maslan 30 ya 60). Note: kam az kam ${MIN_CLEAR_RETENTION_DAYS} din — is se naya data delete nahi ho sakta.`
+        ? `No matching records found — all queue records are after the cutoff date (${cutoffDate.toDateString()}). Enforce at least ${MIN_CLEAR_RETENTION_DAYS} days retention to protect active data.`
         : null;
 
     const parts = [`Deleted ${result.deletedCount} queue record(s)`];

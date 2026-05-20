@@ -48,7 +48,7 @@ exports.getDoctorSchedule = async (req, res) => {
     const doctor = await Doctor.findById(doctorId);
 
     if (!doctor) {
-      return res.status(404).json({ message: "Doctor nahi mila" });
+      return res.status(404).json({ message: "Doctor not found" });
     }
 
     // Aaj ke patients
@@ -92,7 +92,7 @@ exports.updateDoctor = async (req, res) => {
     );
 
     if (!doctor) {
-      return res.status(404).json({ message: "Doctor nahi mila" });
+      return res.status(404).json({ message: "Doctor not found" });
     }
 
     res.json({
@@ -117,7 +117,7 @@ exports.deleteDoctor = async (req, res) => {
     );
 
     if (!doctor) {
-      return res.status(404).json({ message: "Doctor nahi mila" });
+      return res.status(404).json({ message: "Doctor not found" });
     }
 
     res.json({ message: "Doctor removed successfully" });
