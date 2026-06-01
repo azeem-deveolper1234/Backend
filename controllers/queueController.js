@@ -160,19 +160,26 @@ exports.callNextPatient = async (req, res) => {
   try {
     const { serviceName } = req.body;
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
     const nextPatient = await Queue.findOne({
       serviceName,
       status: "waiting",
-      priority: "emergency"
+      priority: "emergency",
+      appointmentDate: { $gte: today, $lt: tomorrow }
     }).sort({ tokenNumber: 1 });
 
     const patient = nextPatient || await Queue.findOne({
       serviceName,
-      status: "waiting"
+      status: "waiting",
+      appointmentDate: { $gte: today, $lt: tomorrow }
     }).sort({ tokenNumber: 1 });
 
     if (!patient) {
-      return res.status(404).json({ message: "No patients waiting" });
+      return res.status(404).json({ message: "No patients waiting for today" });
     }
 
     patient.status = "serving";
@@ -249,19 +256,36 @@ exports.getQueueStatus = async (req, res) => {
     if (!userQueue) {
       return res.status(404).json({ message: "Not in queue" });
     }
+    const targetDate = new Date(userQueue.appointmentDate);
+    targetDate.setHours(0, 0, 0, 0);
+    const nextDay = new Date(targetDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+
     const servingPatient = await Queue.findOne({
       serviceName: userQueue.serviceName,
-      status: "serving"
+      status: "serving",
+      appointmentDate: { $gte: targetDate, $lt: nextDay }
     }).sort({ tokenNumber: 1 });
+    
     const currentServing = servingPatient ? servingPatient.tokenNumber : 0;
-   const peopleAhead = userQueue.tokenNumber - currentServing - 1;
-const estimatedTime = peopleAhead > 0 ? peopleAhead * 15 : 0; // 15 min per patient
+
+    const peopleAhead = await Queue.countDocuments({
+      serviceName: userQueue.serviceName,
+      status: "waiting",
+      appointmentDate: { $gte: targetDate, $lt: nextDay },
+      tokenNumber: { $lt: userQueue.tokenNumber }
+    });
+
+    const doctor = await Doctor.findOne({ name: userQueue.serviceName });
+    const slotDuration = doctor?.slotDuration || 15;
+    const estimatedTime = peopleAhead > 0 ? peopleAhead * slotDuration : 0;
+
     res.json({
        _id: userQueue._id,
       serviceName: userQueue.serviceName,
       currentServing,
       yourToken: userQueue.tokenNumber,
-      peopleAhead: peopleAhead > 0 ? peopleAhead : 0,
+      peopleAhead,
       estimatedTime,
       status: userQueue.status,
       priority: userQueue.priority,

@@ -10,8 +10,8 @@ exports.getTodayAnalytics = async (req, res) => {
 
     // 1. Aaj ka poora data fetch karo (User details ke sath)
     const allQueueToday = await Queue.find({
-      createdAt: { $gte: today, $lt: tomorrow }
-    }).populate('user', 'name email').sort({ createdAt: -1 });
+      appointmentDate: { $gte: today, $lt: tomorrow }
+    }).populate('user', 'name email').sort({ tokenNumber: 1 });
 
     // 2. Data array se counts nikaalo
     const totalPatients = allQueueToday.length;
