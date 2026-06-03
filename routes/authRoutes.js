@@ -32,12 +32,20 @@ router.get("/users", protect, doctorOrAdmin, async (req, res) => {
         return res.json([]);
       }
 
-      // Find all queues for this doctor
-      const queues = await Queue.find({ serviceName: doctorProfile.name });
-      const patientIds = queues.map(q => q.user);
+      const escapedName = doctorProfile.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const queues = await Queue.find({
+        serviceName: { $regex: new RegExp(`^${escapedName}$`, "i") }
+      });
+      const patientIds = [...new Set(queues.map((q) => String(q.user)).filter(Boolean))];
 
-      // Find unique patient users
-      const users = await User.find({ _id: { $in: patientIds }, role: "user" }).select("-password");
+      if (patientIds.length === 0) {
+        return res.json([]);
+      }
+
+      const users = await User.find({
+        _id: { $in: patientIds },
+        role: { $in: ["user"] }
+      }).select("-password");
       return res.json(users);
     }
 

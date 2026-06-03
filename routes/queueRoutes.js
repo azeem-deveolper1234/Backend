@@ -6,6 +6,7 @@ const {
   joinQueue,
   cancelQueue,
   callNextPatient,
+  callPatientByToken,
   getQueueStatus,
   completeQueue,
   getPatientHistory,
@@ -16,6 +17,7 @@ const {
 router.post("/join", protect, joinQueue);
 router.post("/cancel", protect, cancelQueue);        // 👈 naya
 router.post("/call-next", protect, doctorOrAdmin, callNextPatient);
+router.post("/call-token", protect, doctorOrAdmin, callPatientByToken);
 router.post("/complete", protect, doctorOrAdmin, completeQueue);
 router.get("/status", protect, getQueueStatus);
 router.get("/history", protect, getPatientHistory);
@@ -43,7 +45,8 @@ router.get("/patient/:userId", protect, doctorOrAdmin, async (req, res) => {
           doctorProfile = await Doctor.findOne({ email: actor.email });
         }
         if (doctorProfile) {
-          query.serviceName = doctorProfile.name;
+          const escaped = doctorProfile.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          query.serviceName = { $regex: new RegExp(`^${escaped}$`, "i") };
         }
       }
     }

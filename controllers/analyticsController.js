@@ -5,7 +5,19 @@ const Doctor = require("../models/Doctor");
 // Aaj ki analytics
 exports.getTodayAnalytics = async (req, res) => {
   try {
-    const today = new Date();
+    let today = new Date();
+    if (req.query.date) {
+      const s = String(req.query.date).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+        const [y, mo, d] = s.split("-").map((x) => parseInt(x, 10));
+        today = new Date(y, mo - 1, d, 0, 0, 0, 0);
+      } else {
+        const parsed = new Date(req.query.date);
+        if (!Number.isNaN(parsed.getTime())) {
+          today = parsed;
+        }
+      }
+    }
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -15,10 +27,24 @@ exports.getTodayAnalytics = async (req, res) => {
       appointmentDate: { $gte: today, $lt: tomorrow }
     };
 
-    if (user && user.role === "doctor" && user.doctorId) {
-      const doctorDoc = await Doctor.findById(user.doctorId);
+    if (user && user.role === "doctor") {
+      let doctorDoc = null;
+      if (user.doctorId) {
+        doctorDoc = await Doctor.findById(user.doctorId);
+      }
+      if (!doctorDoc) {
+        doctorDoc = await Doctor.findOne({ email: user.email });
+      }
       if (doctorDoc) {
-        filter.serviceName = doctorDoc.name;
+        const escaped = doctorDoc.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const serviceRegex = new RegExp(`^${escaped}$`, "i");
+        filter = {
+          serviceName: serviceRegex,
+          $or: [
+            { appointmentDate: { $gte: today, $lt: tomorrow } },
+            { status: { $in: ["waiting", "serving"] } }
+          ]
+        };
       }
     }
 
@@ -54,8 +80,14 @@ exports.getOverallAnalytics = async (req, res) => {
     const user = await User.findById(req.user.id);
     let filter = {};
 
-    if (user && user.role === "doctor" && user.doctorId) {
-      const doctorDoc = await Doctor.findById(user.doctorId);
+    if (user && user.role === "doctor") {
+      let doctorDoc = null;
+      if (user.doctorId) {
+        doctorDoc = await Doctor.findById(user.doctorId);
+      }
+      if (!doctorDoc) {
+        doctorDoc = await Doctor.findOne({ email: user.email });
+      }
       if (doctorDoc) {
         filter.serviceName = doctorDoc.name;
       }
@@ -73,8 +105,14 @@ exports.getOverallAnalytics = async (req, res) => {
 
     // Sabse busy service logic
     let busyServiceFilter = {};
-    if (user && user.role === "doctor" && user.doctorId) {
-      const doctorDoc = await Doctor.findById(user.doctorId);
+    if (user && user.role === "doctor") {
+      let doctorDoc = null;
+      if (user.doctorId) {
+        doctorDoc = await Doctor.findById(user.doctorId);
+      }
+      if (!doctorDoc) {
+        doctorDoc = await Doctor.findOne({ email: user.email });
+      }
       if (doctorDoc) {
         busyServiceFilter.serviceName = doctorDoc.name;
       }

@@ -13,7 +13,7 @@ const {
 router.post("/create", protect, doctorOnly, createReport);          // Doctor only — report banao
 router.get("/my-reports", protect, getMyReports);                      // Patient — apni reports
 router.get("/:reportId", protect, getSingleReport);                    // Single report
-router.get("/patient/:patientId", protect, adminOnly, getPatientReports); // Admin — patient ki reports
+router.get("/patient/:patientId", protect, doctorOrAdmin, getPatientReports); // Superadmin view / doctor view
 router.put("/:reportId/update", protect, adminOnly, updateReport);     // Admin — update
 
 module.exports = router;

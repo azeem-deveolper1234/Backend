@@ -66,8 +66,9 @@ exports.getMyReports = async (req, res) => {
     const userId = req.user.id;
 
     const reports = await MedicalReport.find({ patient: userId })
-      .populate("doctor", "name specialization")
-      .populate("queue", "serviceName tokenNumber")
+      .populate("doctor", "name specialization phone")
+      .populate("patient", "name email phone")
+      .populate("queue", "serviceName tokenNumber appointmentDate")
       .sort({ createdAt: -1 });
 
     res.json({

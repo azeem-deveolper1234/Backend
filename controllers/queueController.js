@@ -26,6 +26,32 @@ function startOfTodayLocal() {
   return t;
 }
 
+function escapeRegex(value) {
+  return String(value || "").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Queue.serviceName vs Doctor.name — spacing/case differences */
+function serviceNameFilter(name) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return {};
+  return { serviceName: { $regex: new RegExp(`^${escapeRegex(trimmed)}$`, "i") } };
+}
+
+function serviceNamesMatch(a, b) {
+  return escapeRegex(a).toLowerCase() === escapeRegex(b).toLowerCase();
+}
+
+async function findDoctorByNameLoose(name) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return null;
+  return Doctor.findOne({ name: { $regex: new RegExp(`^${escapeRegex(trimmed)}$`, "i") } });
+}
+
+async function assertDoctorOwnsQueue(queueDoc, reqUser, resolvedServiceName) {
+  if (reqUser.role !== "doctor" || !queueDoc) return true;
+  return serviceNamesMatch(queueDoc.serviceName, resolvedServiceName);
+}
+
 async function resolveServiceNameFromActor(requestedServiceName, reqUser) {
   if (reqUser.role !== "doctor") {
     return requestedServiceName;
@@ -43,8 +69,17 @@ async function resolveServiceNameFromActor(requestedServiceName, reqUser) {
   if (!doctorProfile && actor.email) {
     doctorProfile = await Doctor.findOne({ email: actor.email }).select("name");
   }
+  if (!doctorProfile && actor.name) {
+    doctorProfile = await findDoctorByNameLoose(actor.name);
+  }
 
-  return doctorProfile?.name || null;
+  const profileName = doctorProfile?.name?.trim();
+  if (profileName) return profileName;
+
+  const requested = String(requestedServiceName || "").trim();
+  if (requested) return requested;
+
+  return null;
 }
 
 exports.joinQueue = async (req, res) => {
@@ -203,23 +238,24 @@ exports.callNextPatient = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const doctor = await Doctor.findOne({ name: serviceName });
+    const doctor = await findDoctorByNameLoose(serviceName);
     if (!doctor) {
       return res.status(404).json({ message: "Doctor not found" });
     }
 
+    const waitingDateFilter = { $lt: tomorrow };
+    const baseQueueFilter = { ...serviceNameFilter(serviceName), appointmentDate: waitingDateFilter };
+
     const emergencyCount = await Queue.countDocuments({
-      serviceName,
+      ...baseQueueFilter,
       status: "waiting",
-      priority: "emergency",
-      appointmentDate: { $gte: today, $lt: tomorrow }
+      priority: "emergency"
     });
 
     const normalCount = await Queue.countDocuments({
-      serviceName,
+      ...baseQueueFilter,
       status: "waiting",
-      priority: "normal",
-      appointmentDate: { $gte: today, $lt: tomorrow }
+      priority: "normal"
     });
 
     if (emergencyCount === 0 && normalCount === 0) {
@@ -246,10 +282,10 @@ exports.callNextPatient = async (req, res) => {
     }
 
     const patient = await Queue.findOne({
-      serviceName,
+      ...serviceNameFilter(serviceName),
       status: "waiting",
       priority: chosenPriority,
-      appointmentDate: { $gte: today, $lt: tomorrow }
+      appointmentDate: waitingDateFilter
     }).sort({ tokenNumber: 1 });
 
     if (!patient) {
@@ -329,6 +365,89 @@ exports.callNextPatient = async (req, res) => {
   }
 };
 
+/** Specific token ko call karo (overview table ke Call button ke liye) */
+exports.callPatientByToken = async (req, res) => {
+  try {
+    const tokenNumber = Number(req.body.tokenNumber);
+    const { queueId } = req.body;
+    const resolvedServiceName = await resolveServiceNameFromActor(req.body.serviceName, req.user);
+    if (!resolvedServiceName) {
+      return res.status(403).json({ message: "Doctor profile missing. Contact superadmin." });
+    }
+    const serviceName = resolvedServiceName;
+
+    let patient = null;
+
+    if (queueId) {
+      patient = await Queue.findById(queueId);
+      if (patient && !(await assertDoctorOwnsQueue(patient, req.user, serviceName))) {
+        return res.status(403).json({ message: "This patient is not in your queue." });
+      }
+    }
+
+    if (!patient && Number.isFinite(tokenNumber)) {
+      patient = await Queue.findOne({
+        ...serviceNameFilter(serviceName),
+        tokenNumber,
+        status: "waiting"
+      });
+    }
+
+    if (!patient) {
+      return res.status(404).json({
+        message: "No waiting patient found. Refresh dashboard and try again."
+      });
+    }
+
+    if (patient.status !== "waiting") {
+      return res.status(400).json({
+        message: `Token #${patient.tokenNumber} is "${patient.status}", not waiting. Refresh the page.`
+      });
+    }
+
+    const existingServing = await Queue.findOne({
+      ...serviceNameFilter(serviceName),
+      status: "serving"
+    });
+    if (existingServing && existingServing._id.toString() !== patient._id.toString()) {
+      return res.status(400).json({
+        message: `Token #${existingServing.tokenNumber} is currently being served. Finish that visit first.`
+      });
+    }
+
+    if (!Number.isFinite(tokenNumber) && !queueId) {
+      return res.status(400).json({ message: "Valid token number or queue id is required" });
+    }
+
+    patient.status = "serving";
+    await patient.save();
+
+    const user = await User.findById(patient.user);
+    if (user && user.phone) {
+      await sendTurnSMS(user.phone, {
+        tokenNumber: patient.tokenNumber,
+        doctorName: patient.serviceName
+      });
+    }
+
+    const io = req.app.get("io");
+    io.emit("queueUpdated", {
+      message: "Patient called",
+      tokenNumber: patient.tokenNumber,
+      serviceName: patient.serviceName,
+      priority: patient.priority
+    });
+
+    res.json({
+      message: "Patient called",
+      tokenNumber: patient.tokenNumber,
+      priority: patient.priority
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getQueueStatus = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -382,21 +501,39 @@ exports.getQueueStatus = async (req, res) => {
 
 exports.completeQueue = async (req, res) => {
   try {
-    const { tokenNumber } = req.body;
+    const { tokenNumber, queueId } = req.body;
     const resolvedServiceName = await resolveServiceNameFromActor(req.body.serviceName, req.user);
     if (!resolvedServiceName) {
       return res.status(403).json({ message: "Doctor profile missing. Contact superadmin." });
     }
     const serviceName = resolvedServiceName;
 
-    const queueEntry = await Queue.findOne({
-      tokenNumber,
-      serviceName,
-      status: "serving"
-    });
+    let queueEntry = null;
+
+    if (queueId) {
+      queueEntry = await Queue.findById(queueId);
+      if (queueEntry && !(await assertDoctorOwnsQueue(queueEntry, req.user, serviceName))) {
+        return res.status(403).json({ message: "This patient is not in your queue." });
+      }
+      if (queueEntry && queueEntry.status !== "serving") {
+        return res.status(400).json({
+          message: `Token #${queueEntry.tokenNumber} is "${queueEntry.status}". Press Call first, then Finish.`
+        });
+      }
+    }
+
+    if (!queueEntry && tokenNumber != null && tokenNumber !== "") {
+      queueEntry = await Queue.findOne({
+        ...serviceNameFilter(serviceName),
+        tokenNumber: Number(tokenNumber),
+        status: "serving"
+      });
+    }
 
     if (!queueEntry) {
-      return res.status(404).json({ message: "No active serving found" });
+      return res.status(404).json({
+        message: "No patient is currently in serving status. Press Call first, then Finish."
+      });
     }
 
     queueEntry.status = "completed";
