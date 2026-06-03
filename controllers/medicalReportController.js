@@ -1,5 +1,6 @@
 const MedicalReport = require("../models/MedicalReport");
 const Queue = require("../models/Queue");
+const User = require("../models/User");
 
 // Report banao — Admin/Doctor only
 exports.createReport = async (req, res) => {
@@ -20,9 +21,22 @@ exports.createReport = async (req, res) => {
       followUp
     } = req.body;
 
+    let finalDoctorId = doctorId;
+    if (req.user?.role === "doctor") {
+      const actor = await User.findById(req.user.id).select("doctorId role");
+      if (!actor || actor.role !== "doctor" || !actor.doctorId) {
+        return res.status(403).json({ message: "Doctor profile missing. Contact superadmin." });
+      }
+      finalDoctorId = actor.doctorId;
+    }
+
+    if (!patientId || !finalDoctorId || !queueId || !diagnosis) {
+      return res.status(400).json({ message: "patientId, doctorId, queueId, and diagnosis are required" });
+    }
+
     const report = await MedicalReport.create({
       patient: patientId,
-      doctor: doctorId,
+      doctor: finalDoctorId,
       queue: queueId,
       diagnosis,
       prescription,

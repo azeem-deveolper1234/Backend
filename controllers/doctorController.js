@@ -1,14 +1,21 @@
 const Doctor = require("../models/Doctor");
 const Queue = require("../models/Queue");
+const User = require("../models/User");
+const bcrypt = require("bcryptjs");
 
 // Doctor add karo (Admin only)
 exports.addDoctor = async (req, res) => {
   try {
-    const { name, specialization, email, phone, schedule, slotDuration, maxPatientsPerDay } = req.body;
+    const { name, specialization, email, phone, schedule, slotDuration, maxPatientsPerDay, password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ message: "Password is required to create doctor login credentials." });
+    }
 
     const doctorExists = await Doctor.findOne({ email });
-    if (doctorExists) {
-      return res.status(400).json({ message: "Doctor already exists" });
+    const userExists = await User.findOne({ email });
+    if (doctorExists || userExists) {
+      return res.status(400).json({ message: "A doctor or user account with this email already exists" });
     }
 
     const doctor = await Doctor.create({
@@ -21,9 +28,25 @@ exports.addDoctor = async (req, res) => {
       maxPatientsPerDay: maxPatientsPerDay || 20
     });
 
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const doctorUser = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+      role: "doctor",
+      phone,
+      doctorId: doctor._id
+    });
+
     res.status(201).json({
-      message: "Doctor added successfully",
-      doctor
+      message: "Doctor and login account created successfully",
+      doctor,
+      doctorUser: {
+        id: doctorUser._id,
+        name: doctorUser.name,
+        email: doctorUser.email,
+        role: doctorUser.role
+      }
     });
 
   } catch (error) {
@@ -119,6 +142,12 @@ exports.deleteDoctor = async (req, res) => {
     if (!doctor) {
       return res.status(404).json({ message: "Doctor not found" });
     }
+
+    // Associated login user's role ko demote karo to "user" and remove doctorId link
+    await User.findOneAndUpdate(
+      { doctorId: doctor._id },
+      { role: "user", doctorId: null }
+    );
 
     res.json({ message: "Doctor removed successfully" });
 

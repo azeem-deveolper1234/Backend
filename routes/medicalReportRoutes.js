@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/authMiddleware");
-const { adminOnly } = require("../middleware/adminMiddleware");
+const { adminOnly, doctorOrAdmin, doctorOnly } = require("../middleware/adminMiddleware");
 const {
   createReport,
   getMyReports,
@@ -10,7 +10,7 @@ const {
   updateReport
 } = require("../controllers/medicalReportController");
 
-router.post("/create", protect, adminOnly, createReport);              // Admin — report banao
+router.post("/create", protect, doctorOnly, createReport);          // Doctor only — report banao
 router.get("/my-reports", protect, getMyReports);                      // Patient — apni reports
 router.get("/:reportId", protect, getSingleReport);                    // Single report
 router.get("/patient/:patientId", protect, adminOnly, getPatientReports); // Admin — patient ki reports

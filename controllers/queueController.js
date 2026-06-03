@@ -4,6 +4,7 @@ const Doctor = require("../models/Doctor");
 const Payment = require("../models/Payment");
 const MedicalReport = require("../models/MedicalReport");
 const { sendAppointmentSMS, sendTurnSMS, sendCancellationSMS, sendApproachingSMS } = require("../services/smsService");
+const { checkEmergency } = require("../services/aiService");
 
 /** HTML date (YYYY-MM-DD) ko server ke local calendar day se map karo — sirf `new Date("YYYY-MM-DD")` UTC midnight se "aaj" galat reject hota tha */
 function localMidnightFromAppointmentInput(appointmentDate) {
@@ -23,6 +24,27 @@ function startOfTodayLocal() {
   const t = new Date();
   t.setHours(0, 0, 0, 0);
   return t;
+}
+
+async function resolveServiceNameFromActor(requestedServiceName, reqUser) {
+  if (reqUser.role !== "doctor") {
+    return requestedServiceName;
+  }
+
+  const actor = await User.findById(reqUser.id).select("doctorId email role");
+  if (!actor || actor.role !== "doctor") {
+    return null;
+  }
+
+  let doctorProfile = null;
+  if (actor.doctorId) {
+    doctorProfile = await Doctor.findById(actor.doctorId).select("name");
+  }
+  if (!doctorProfile && actor.email) {
+    doctorProfile = await Doctor.findOne({ email: actor.email }).select("name");
+  }
+
+  return doctorProfile?.name || null;
 }
 
 exports.joinQueue = async (req, res) => {
@@ -59,8 +81,7 @@ exports.joinQueue = async (req, res) => {
 
     const lastToken = await Queue.findOne({
       serviceName,
-      appointmentDate: { $gte: targetDate, $lt: nextDay },
-      status: { $in: ["waiting", "serving", "completed"] } 
+      appointmentDate: { $gte: targetDate, $lt: nextDay }
     }).sort({ tokenNumber: -1 });
 
     const todayPatients = await Queue.countDocuments({
@@ -78,14 +99,27 @@ exports.joinQueue = async (req, res) => {
 
     const tokenNumber = lastToken ? lastToken.tokenNumber + 1 : 1;
 
+    let finalPriority = priority || "normal";
+    let finalNotes = notes || "";
+
+    if (finalPriority === "emergency") {
+      const aiResult = await checkEmergency(finalNotes);
+      if (!aiResult.isEmergency) {
+        finalPriority = "normal";
+        finalNotes = finalNotes
+          ? `${finalNotes} \n[System Note: AI Downgraded from Emergency - Reason: ${aiResult.reasoning}]`
+          : `[System Note: AI Downgraded from Emergency - Reason: ${aiResult.reasoning}]`;
+      }
+    }
+
     const queue = await Queue.create({
       user: userId,
       serviceName,
       tokenNumber,
       status: "waiting",
-      priority: priority || "normal",
+      priority: finalPriority,
       appointmentDate: targetDate,
-      notes: notes || ""
+      notes: finalNotes
     });
 
     // SMS bhejo — appointment confirm
@@ -158,29 +192,78 @@ exports.cancelQueue = async (req, res) => {
 
 exports.callNextPatient = async (req, res) => {
   try {
-    const { serviceName } = req.body;
+    const resolvedServiceName = await resolveServiceNameFromActor(req.body.serviceName, req.user);
+    if (!resolvedServiceName) {
+      return res.status(403).json({ message: "Doctor profile missing. Contact superadmin." });
+    }
+    const serviceName = resolvedServiceName;
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const nextPatient = await Queue.findOne({
+    const doctor = await Doctor.findOne({ name: serviceName });
+    if (!doctor) {
+      return res.status(404).json({ message: "Doctor not found" });
+    }
+
+    const emergencyCount = await Queue.countDocuments({
       serviceName,
       status: "waiting",
       priority: "emergency",
       appointmentDate: { $gte: today, $lt: tomorrow }
-    }).sort({ tokenNumber: 1 });
+    });
 
-    const patient = nextPatient || await Queue.findOne({
+    const normalCount = await Queue.countDocuments({
       serviceName,
       status: "waiting",
+      priority: "normal",
+      appointmentDate: { $gte: today, $lt: tomorrow }
+    });
+
+    if (emergencyCount === 0 && normalCount === 0) {
+      return res.status(404).json({ message: "No patients waiting for today" });
+    }
+
+    let chosenPriority = "normal";
+
+    if (emergencyCount > 0 && normalCount > 0) {
+      // Both exist: decide based on 3:2 calling logic
+      if (doctor.consecutiveNormals < 3 && doctor.consecutiveEmergencies === 0) {
+        chosenPriority = "normal";
+      } else if (doctor.consecutiveEmergencies < 2) {
+        chosenPriority = "emergency";
+      } else {
+        doctor.consecutiveNormals = 0;
+        doctor.consecutiveEmergencies = 0;
+        chosenPriority = "normal";
+      }
+    } else if (emergencyCount > 0) {
+      chosenPriority = "emergency";
+    } else {
+      chosenPriority = "normal";
+    }
+
+    const patient = await Queue.findOne({
+      serviceName,
+      status: "waiting",
+      priority: chosenPriority,
       appointmentDate: { $gte: today, $lt: tomorrow }
     }).sort({ tokenNumber: 1 });
 
     if (!patient) {
       return res.status(404).json({ message: "No patients waiting for today" });
     }
+
+    if (patient.priority === "emergency") {
+      doctor.consecutiveEmergencies += 1;
+      doctor.consecutiveNormals = 0;
+    } else {
+      doctor.consecutiveNormals += 1;
+      doctor.consecutiveEmergencies = 0;
+    }
+    await doctor.save();
 
     patient.status = "serving";
     await patient.save();
@@ -299,7 +382,12 @@ exports.getQueueStatus = async (req, res) => {
 
 exports.completeQueue = async (req, res) => {
   try {
-    const { tokenNumber, serviceName } = req.body;
+    const { tokenNumber } = req.body;
+    const resolvedServiceName = await resolveServiceNameFromActor(req.body.serviceName, req.user);
+    if (!resolvedServiceName) {
+      return res.status(403).json({ message: "Doctor profile missing. Contact superadmin." });
+    }
+    const serviceName = resolvedServiceName;
 
     const queueEntry = await Queue.findOne({
       tokenNumber,

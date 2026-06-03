@@ -8,6 +8,10 @@ function normalizeEmail(email) {
     .toLowerCase();
 }
 
+function normalizeRole(role) {
+  return role === "admin" ? "superadmin" : role;
+}
+
 /** Atlas / purane docs mein mixed-case email ho sakti hai — MongoDB default match case-sensitive hai */
 const EMAIL_COLLATION = { locale: "en", strength: 2 };
 
@@ -20,8 +24,9 @@ function publicUserFields(user) {
     id: user._id,
     name: user.name,
     email: user.email,
-    role: user.role,
-    phone: user.phone || ""
+    role: normalizeRole(user.role),
+    phone: user.phone || "",
+    doctorId: user.doctorId || null
   };
 }
 
@@ -86,7 +91,8 @@ exports.loginUser = async (req, res) => {
       return res.status(400).json({ message: "Invalid email or password" });
     }
 
-    const token = jwt.sign({ id: user._id, role: user.role }, secret, {
+    const role = normalizeRole(user.role);
+    const token = jwt.sign({ id: user._id, role }, secret, {
       expiresIn: "7d"
     });
 

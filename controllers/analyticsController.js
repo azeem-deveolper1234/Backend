@@ -1,4 +1,6 @@
 const Queue = require("../models/Queue");
+const User = require("../models/User");
+const Doctor = require("../models/Doctor");
 
 // Aaj ki analytics
 exports.getTodayAnalytics = async (req, res) => {
@@ -8,10 +10,20 @@ exports.getTodayAnalytics = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // 1. Aaj ka poora data fetch karo (User details ke sath)
-    const allQueueToday = await Queue.find({
+    const user = await User.findById(req.user.id);
+    let filter = {
       appointmentDate: { $gte: today, $lt: tomorrow }
-    }).populate('user', 'name email').sort({ tokenNumber: 1 });
+    };
+
+    if (user && user.role === "doctor" && user.doctorId) {
+      const doctorDoc = await Doctor.findById(user.doctorId);
+      if (doctorDoc) {
+        filter.serviceName = doctorDoc.name;
+      }
+    }
+
+    // 1. Aaj ka poora data fetch karo (User details ke sath)
+    const allQueueToday = await Queue.find(filter).populate('user', 'name email').sort({ tokenNumber: 1 });
 
     // 2. Data array se counts nikaalo
     const totalPatients = allQueueToday.length;
@@ -39,8 +51,18 @@ exports.getTodayAnalytics = async (req, res) => {
 // Overall analytics
 exports.getOverallAnalytics = async (req, res) => {
   try {
+    const user = await User.findById(req.user.id);
+    let filter = {};
+
+    if (user && user.role === "doctor" && user.doctorId) {
+      const doctorDoc = await Doctor.findById(user.doctorId);
+      if (doctorDoc) {
+        filter.serviceName = doctorDoc.name;
+      }
+    }
+
     // 1. Database se saare patients (Ever) ka data nikaalo
-    const allQueueHistory = await Queue.find()
+    const allQueueHistory = await Queue.find(filter)
       .populate('user', 'name email')
       .sort({ createdAt: -1 });
 
@@ -50,7 +72,16 @@ exports.getOverallAnalytics = async (req, res) => {
     const normalPatients = allQueueHistory.filter(q => q.priority === "normal").length;
 
     // Sabse busy service logic
+    let busyServiceFilter = {};
+    if (user && user.role === "doctor" && user.doctorId) {
+      const doctorDoc = await Doctor.findById(user.doctorId);
+      if (doctorDoc) {
+        busyServiceFilter.serviceName = doctorDoc.name;
+      }
+    }
+
     const busyService = await Queue.aggregate([
+      { $match: busyServiceFilter },
       { $group: { _id: "$serviceName", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: 1 }

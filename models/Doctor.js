@@ -52,6 +52,14 @@ const doctorSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true
+    },
+    consecutiveNormals: {
+      type: Number,
+      default: 0
+    },
+    consecutiveEmergencies: {
+      type: Number,
+      default: 0
     }
   },
   { timestamps: true }

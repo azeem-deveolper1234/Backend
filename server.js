@@ -4,6 +4,7 @@ const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
 const connectDB = require("./config/db");
+const User = require("./models/User");
 const authRoutes = require("./routes/authRoutes");
 const queueRoutes = require("./routes/queueRoutes");
 const analyticsRoutes = require("./routes/analyticsRoutes");
@@ -18,6 +19,22 @@ const io = new Server(server, {
 });
 
 connectDB();
+
+async function migrateLegacyAdmins() {
+  try {
+    const result = await User.updateMany(
+      { role: "admin" },
+      { $set: { role: "superadmin" } }
+    );
+    if (result.modifiedCount > 0) {
+      console.log(`Migrated ${result.modifiedCount} legacy admin account(s) to superadmin.`);
+    }
+  } catch (error) {
+    console.error("Role migration failed:", error.message);
+  }
+}
+
+migrateLegacyAdmins();
 
 app.use(cors());
 app.use(express.json());
