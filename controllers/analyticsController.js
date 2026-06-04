@@ -24,7 +24,11 @@ exports.getTodayAnalytics = async (req, res) => {
 
     const user = await User.findById(req.user.id);
     let filter = {
-      appointmentDate: { $gte: today, $lt: tomorrow }
+      $or: [
+        { appointmentDate: { $gte: today, $lt: tomorrow } },
+        { status: { $in: ["waiting", "serving"] } },
+        { status: { $in: ["completed", "cancelled"] }, updatedAt: { $gte: today, $lt: tomorrow } }
+      ]
     };
 
     if (user && user.role === "doctor") {
@@ -42,7 +46,8 @@ exports.getTodayAnalytics = async (req, res) => {
           serviceName: serviceRegex,
           $or: [
             { appointmentDate: { $gte: today, $lt: tomorrow } },
-            { status: { $in: ["waiting", "serving"] } }
+            { status: { $in: ["waiting", "serving"] } },
+            { status: { $in: ["completed", "cancelled"] }, updatedAt: { $gte: today, $lt: tomorrow } }
           ]
         };
       }
