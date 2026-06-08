@@ -49,6 +49,22 @@ const doctorSchema = new mongoose.Schema(
       type: Number,
       default: 1000  // 👈 default fee Rs. 1000
     },
+    degree: {
+      type: String,
+      default: "M.B.B.S."
+    },
+    experience: {
+      type: Number,
+      default: 5
+    },
+    specializedFrom: {
+      type: String,
+      default: "City Medical University"
+    },
+    about: {
+      type: String,
+      default: "Experienced clinical specialist."
+    },
     isActive: {
       type: Boolean,
       default: true

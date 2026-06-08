@@ -6,7 +6,21 @@ const bcrypt = require("bcryptjs");
 // Doctor add karo (Admin only)
 exports.addDoctor = async (req, res) => {
   try {
-    const { name, specialization, email, phone, schedule, slotDuration, maxPatientsPerDay, password } = req.body;
+    const { 
+      name, 
+      specialization, 
+      email, 
+      phone, 
+      schedule, 
+      slotDuration, 
+      maxPatientsPerDay, 
+      password,
+      degree,
+      experience,
+      specializedFrom,
+      about,
+      consultationFee
+    } = req.body;
 
     if (!password) {
       return res.status(400).json({ message: "Password is required to create doctor login credentials." });
@@ -25,7 +39,12 @@ exports.addDoctor = async (req, res) => {
       phone,
       schedule,
       slotDuration: slotDuration || 15,
-      maxPatientsPerDay: maxPatientsPerDay || 20
+      maxPatientsPerDay: maxPatientsPerDay || 20,
+      degree,
+      experience,
+      specializedFrom,
+      about,
+      consultationFee: consultationFee || 1000
     });
 
     const hashedPassword = await bcrypt.hash(password, 10);

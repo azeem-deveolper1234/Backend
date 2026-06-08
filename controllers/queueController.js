@@ -84,13 +84,26 @@ async function resolveServiceNameFromActor(requestedServiceName, reqUser) {
 
 exports.joinQueue = async (req, res) => {
   try {
-    const { serviceName, appointmentDate, priority, notes } = req.body;
+    const { serviceName, appointmentDate, priority, notes, paymentMethod } = req.body;
     const userId = req.user.id;
 
+    const pm = String(paymentMethod || "").toLowerCase().trim();
+    if (!pm || pm === "cash") {
+      return res.status(400).json({ 
+        message: "Online advance payment is required to book a token. Please select Card, Easypaisa, or JazzCash." 
+      });
+    }
+
+    if (!["easypaisa", "jazzcash", "card", "online"].includes(pm)) {
+      return res.status(400).json({ 
+        message: "Invalid payment method specified." 
+      });
+    }
+
     const existingQueue = await Queue.findOne({
-  user: userId,
-  status: { $in: ["waiting", "serving"] }
-});
+      user: userId,
+      status: { $in: ["waiting", "serving"] }
+    });
 
     if (existingQueue) {
       return res.status(400).json({ message: "Already in queue" });
@@ -156,6 +169,44 @@ exports.joinQueue = async (req, res) => {
       appointmentDate: targetDate,
       notes: finalNotes
     });
+
+    try {
+      const pm = String(req.body.paymentMethod || "cash").toLowerCase().trim();
+      let methodToSave = "cash";
+      let wc = null;
+      if (pm === "easypaisa" || pm === "jazzcash") {
+        methodToSave = "online";
+        wc = pm;
+      } else if (pm === "card") {
+        methodToSave = "card";
+      } else if (pm === "online") {
+        methodToSave = "online";
+        const w = req.body.walletChannel ? String(req.body.walletChannel).toLowerCase().trim() : null;
+        if (w === "easypaisa" || w === "jazzcash") {
+          wc = w;
+        }
+      }
+
+      const fee = doctor ? doctor.consultationFee || 1000 : 1000;
+      const advanceAmount = fee / 2;
+      const remainingAmount = fee - advanceAmount;
+
+      const Payment = require("../models/Payment");
+      await Payment.create({
+        user: userId,
+        queue: queue._id,
+        doctor: doctor ? doctor._id : null,
+        totalAmount: fee,
+        advanceAmount,
+        remainingAmount,
+        advanceStatus: "paid",
+        paymentMethod: methodToSave,
+        ...(wc ? { walletChannel: wc } : {})
+      });
+    } catch (payErr) {
+      await Queue.findByIdAndDelete(queue._id);
+      return res.status(500).json({ message: "Failed to initialize payment for the booking: " + payErr.message });
+    }
 
     // SMS bhejo — appointment confirm
     const user = await User.findById(userId);

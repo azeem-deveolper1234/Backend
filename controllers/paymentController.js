@@ -32,6 +32,26 @@ exports.createPayment = async (req, res) => {
       methodToSave = "online";
     }
 
+    // Check if a payment for this queueId already exists
+    const existingPayment = await Payment.findOne({ queue: queueId });
+    if (existingPayment) {
+      existingPayment.paymentMethod = methodToSave;
+      existingPayment.walletChannel = wc;
+      await existingPayment.save();
+
+      return res.status(201).json({
+        message: "Advance payment successful",
+        payment: {
+          totalAmount: existingPayment.totalAmount,
+          advanceAmount: existingPayment.advanceAmount,
+          remainingAmount: existingPayment.remainingAmount,
+          advanceStatus: existingPayment.advanceStatus,
+          paymentMethod: existingPayment.paymentMethod,
+          walletChannel: existingPayment.walletChannel || null
+        }
+      });
+    }
+
     const numAmount = Number(totalAmount);
     if (!Number.isFinite(numAmount) || numAmount <= 0) {
       return res.status(400).json({ message: "The specified totalAmount is invalid" });
