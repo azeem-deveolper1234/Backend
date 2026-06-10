@@ -18,8 +18,6 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-connectDB();
-
 async function migrateLegacyAdmins() {
   try {
     const result = await User.updateMany(
@@ -34,7 +32,9 @@ async function migrateLegacyAdmins() {
   }
 }
 
-migrateLegacyAdmins();
+connectDB().then(() => {
+  migrateLegacyAdmins();
+});
 
 app.use(cors());
 app.use(express.json());
